@@ -2,8 +2,7 @@ import math
 from .PCA9685 import PCA9685
 from .ADC import *
 import time
-
-
+import math
 import sys
 
 # Ensure the script can access ROS packages
@@ -51,6 +50,22 @@ def quaternion_to_euler(x, y, z, w):
    # print(yaw)
     return yaw  # return only yaw angle (in radians)
 
+
+def calculate_turn_angle(current_position, current_angle, destination):
+    # Calculate direction vector to destination
+    direction = (destination[0] - current_position[0], destination[1] - current_position[1])
+
+    # Calculate desired orientation
+    desired_orientation = ((math.atan2(direction[1], direction[0])) - (math.pi/2))
+
+    # Calculate turn angle to face the correct orientation
+    turn_angle = desired_orientation - current_angle
+
+    # Normalize turn angle to be within the range of -π to +π
+    turn_angle = (turn_angle + math.pi) % (2 * math.pi) - math.pi
+    return turn_angle
+
+
 class CarControl(Node):
     def __init__(self):
         super().__init__('car_control')
@@ -84,9 +99,11 @@ class CarControl(Node):
             self.starting_pose = msg
 
         self.latest_pose = msg
-
+        curr_pos_test = (self.latest_pose.pose.position.x, self.latest_pose.pose.position.y)
+        dest_pos_test = (-1.5, -2.4)
         current_angle = quaternion_to_euler(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w)
-        print(current_angle)
+        print("Curr angle", current_angle)
+        print("turn angle", calculate_turn_angle(curr_pos_test, current_angle, dest_pos_test))
         # print(quaternion_to_euler())
         # print(quaternion_to_euler(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w))
         # Calculate the condition to move forward
@@ -97,7 +114,7 @@ class CarControl(Node):
             # Calculate elapsed time since the car started moving
             elapsed_time = time.time() - self.movement_start_time
             # If more than 5 seconds have passed, stop the car indefinitely
-            if elapsed_time > 3:
+            if elapsed_time > 1000:
                 self.PWM.setMotorModel(0, 0, 0, 0)  # Stop
                 print("Stopping indefinitely due to exceeding 5 seconds of movement")
                 self.stop_indefinitely = True  # Set the flag to stop indefinitely
@@ -112,7 +129,7 @@ class CarControl(Node):
                 print("Stop")
         elif should_move_forward:
             # If the car should move forward and isn't already, start moving and record the start time
-            self.PWM.setMotorModel(2000, 2000, 2000, 2000)  # Forward
+            # self.PWM.setMotorModel(2000, 2000, 2000, 2000)  # Forward
             self.movement_start_time = time.time()  # Record the time when movement starts
             print("Forward")
 
@@ -264,3 +281,4 @@ if __name__ == '__main__':
     finally:
         Odometry.destroy_node()
         rclpy.shutdown()
+
