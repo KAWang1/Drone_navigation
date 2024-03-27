@@ -1,0 +1,9 @@
+ while(current_position is not destination):
+        if turn_angle > 0.0:
+        # Turn right
+            PWM.setMotorModel(500, 500, -500, -500)  
+        elif turn_angle < 0.0:
+        # Turn left
+            PWM.setMotorModel(-500, -500, 500, 500)  
+        else:
+            PWM.setMotorModel(1000, 1000, 1000, 1000) #Go straight
