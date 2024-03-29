@@ -47,7 +47,7 @@ def quaternion_to_euler(x, y, z, w):
     t4 = +1.0 - 2.0 * (y * y + z * z)
     yaw = math.atan2(t3, t4)
 
-   # print(yaw)
+    # print(yaw)
     return yaw  # return only yaw angle (in radians)
 
 
@@ -65,6 +65,40 @@ def calculate_turn_angle(current_position, current_angle, destination):
     turn_angle = (turn_angle + math.pi) % (2 * math.pi) - math.pi
     return turn_angle
 
+def should_stop(curr_coords, dest_coords, dest_buffer):
+    cx, cy = curr_coords
+    dx, dy = dest_coords
+
+    # Check if the car is within the optitrack
+    buffer_x_min = -3.0
+    buffer_y_min = -4.0
+    buffer_x_max = 3.0
+    buffer_y_max = -1.0
+
+    within_buffer = (
+        cx <= buffer_x_min and cx >= buffer_x_max and
+        cy <= buffer_y_min and cy >= buffer_y_max
+    )
+
+    # Check if the car is within the destination buffer zone
+    dest_x_min = dx - dest_buffer
+    dest_y_min = dy - dest_buffer
+    dest_x_max = dx + dest_buffer
+    dest_y_max = dy + dest_buffer
+
+    within_dest_buffer = (
+        cx >= dest_x_min and cx <= dest_x_max and
+        cy >= dest_y_min and cy <= dest_y_max
+    )
+
+    if within_buffer:
+        print("Reached Boarder")
+        return True
+    elif within_dest_buffer:
+        print("Reached Destination")
+        return True
+    else:
+        return False
 
 class CarControl(Node):
     def __init__(self):
@@ -84,8 +118,10 @@ class CarControl(Node):
         self.movement_start_time = None  # Track when movement starts
 
         self.stop_indefinitely = False  # Flag to indicate stopping indefinitely
-
-
+        self.current_angle = 0.0
+        self.turn_angle = 0.0
+        self.curr_pos_test = None
+        self.isnotaligned = True
         #self.timer = self.create_timer(0.02, self.pose_callback)  # 20ms timer
 
 
@@ -99,39 +135,73 @@ class CarControl(Node):
             self.starting_pose = msg
 
         self.latest_pose = msg
-        curr_pos_test = (self.latest_pose.pose.position.x, self.latest_pose.pose.position.y)
+
+        self.curr_pos_test = (self.latest_pose.pose.position.x, self.latest_pose.pose.position.y)
+
         dest_pos_test = (-1.5, -2.4)
-        current_angle = quaternion_to_euler(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w)
-        print("Curr angle", current_angle)
-        print("turn angle", calculate_turn_angle(curr_pos_test, current_angle, dest_pos_test))
-        # print(quaternion_to_euler())
-        # print(quaternion_to_euler(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w))
+
+        dest_reached = should_stop(self.curr_pos_test, dest_pos_test, 0.25)
+
+        self.current_angle = quaternion_to_euler(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w)
+
+        self.turn_angle = calculate_turn_angle(self.curr_pos_test, self.current_angle, dest_pos_test)
+
+
+        # print("Curr angle", current_angle)
+
+        # print("turn angle", calculate_turn_angle(self.curr_pos_test, self.current_angle, dest_pos_test))
+
         # Calculate the condition to move forward
-        should_move_forward = self.latest_pose.pose.position.x < self.starting_pose.pose.position.x + 1
-        # print(self.latest_pose.pose.orientation.x, self.latest_pose.pose.orientation.y, self.latest_pose.pose.orientation.z, self.latest_pose.pose.orientation.w)
+        # should_move_forward = self.latest_pose.pose.position.x < self.starting_pose.pose.position.x + 1
+
         # Check if the car is already moving by seeing if movement_start_time is set
-        if self.movement_start_time is not None:
-            # Calculate elapsed time since the car started moving
-            elapsed_time = time.time() - self.movement_start_time
-            # If more than 5 seconds have passed, stop the car indefinitely
-            if elapsed_time > 1000:
+
+        # if self.movement_start_time is None and self.turn_angle is not 0.0:
+        if self.stop_indefinitely is not True:
+            if self.isnotaligned:
+                # Calculate elapsed time since the car started moving
+                # elapsed_time = time.time() - self.movement_start_time
+                print("Aligning...")
+                # while(self.turn_angle is not 0.0):
+                print(self.turn_angle)
+                if self.turn_angle > -0.025 and self.turn_angle < 0.025:
+                    self.isnotaligned = False
+                    self.movement_start_time = time.time()  # Record the time when movement starts
+                    print("Alignment Complete")
+                elif self.turn_angle > 0:
+                    # Turn right
+                    self.PWM.setMotorModel(1000, 1000, -1000, -1000)
+                elif self.turn_angle < 0:
+                    # Turn left
+                    self.PWM.setMotorModel(-1000, -1000, 1000, 1000)
+                else:
+                    self.isnotaligned = False
+                    self.movement_start_time = time.time()  # Record the time when movement starts
+                    print("Alignment Complete")
+
+            elif dest_reached:
                 self.PWM.setMotorModel(0, 0, 0, 0)  # Stop
-                print("Stopping indefinitely due to exceeding 5 seconds of movement")
+                print("Stopping...")
                 self.stop_indefinitely = True  # Set the flag to stop indefinitely
                 self.movement_start_time = None  # Reset the timer
-            elif should_move_forward:
-                # Car should continue moving forward, nothing to do here
-                pass
+
             else:
-                # If the car should not move forward and hasn't exceeded time, stop it.
-                self.PWM.setMotorModel(0, 0, 0, 0)  # Stop
-                self.movement_start_time = None
-                print("Stop")
-        elif should_move_forward:
-            # If the car should move forward and isn't already, start moving and record the start time
-            # self.PWM.setMotorModel(2000, 2000, 2000, 2000)  # Forward
-            self.movement_start_time = time.time()  # Record the time when movement starts
-            print("Forward")
+                print(self.turn_angle)
+                if self.turn_angle > -0.025 and self.turn_angle < 0.025:
+                    self.PWM.setMotorModel(1000, 1000, 1000, 1000) #Go straight
+
+                if self.turn_angle > 0:
+                    # Turn right
+                    print("Self Correction: Turn Left")
+                    self.PWM.setMotorModel(1000, 1000, 100, 100)
+
+                elif self.turn_angle < 0:
+                    # Turn left
+                    print("Self Correction : Turn Right")
+                    self.PWM.setMotorModel(100, 100, 1000, 1000)
+
+                else:
+                    self.PWM.setMotorModel(1000, 1000, 1000, 1000) #Go straight
 
 
 class Motor:
